@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # bin/compile <build-dir> <cache-dir>
 
+#This script performs the buildpack transformation. BUILD_DIR will be the location of the app
+#and CACHE_DIR will be a location the buildpack can use to cache build artifacts between builds.
+
+#All output received on stdout from this script will be displayed to the user (for interactive git-push builds) and stored with the build.
+
+#The application in BUILD_DIR along with all changes made by the compile script will be packaged into a slug.
+
+#ENV_DIR is a directory that contains a file for each of the application’s configuration variables.
+#Config vars are made available as environment variables during execution of commands specified in the Procfile, as well as when running one-off processes.
+
+
+
 # Fail fast
 #Exit immediately if a command exits with a non-zero status.
 set -e
@@ -64,17 +76,17 @@ function display_info_for_package (){
 
 #Moved old fetch and vendor code into function, to be called for each library
 function fetch_and_vendor (){
-  VENDORED="vendor/${1}/$VERSION"
+  version=$(manifest_version "${1}")
+  vendored="vendor/${1}/$version"
   #If the file doesn't exist
-  if [ ! -d $CACHE_DIR/$VENDORED ]; then
-    VERSION=$(manifest_version "${1}")
+  if [ ! -d $CACHE_DIR/$vendored ]; then
     echo "-----> Fetching and vendoring ${1}"
     rm -rf "$CACHE_DIR/vendor/${1}"
-    download_package "${1}" "${VERSION}" "${CACHE_DIR}/${VENDORED}"
+    download_package "${1}" "${version}" "${CACHE_DIR}/${vendored}"
   fi
  
   # Copy artifacts out of cache if exists.
-  cp -r $CACHE_DIR/$VENDORED/* $BUILD_DIR/$TARGET_VENDOR_DIR &> /dev/null || true
+  cp -r $CACHE_DIR/$vendored/* $BUILD_DIR/$TARGET_VENDOR_DIR &> /dev/null || true
 }
 
 display_info_for_package "geos"
@@ -86,10 +98,10 @@ fetch_and_vendor "gdal"
 fetch_and_vendor "proj"
 
 # Setup environment variables
-set-env GEOS_LIBRARY_PATH "$APP_VENDOR/lib"
-set-env GDAL_LIBRARY_PATH "$APP_VENDOR/lib"
-set-env PROJ4_LIBRARY_PATH "$APP_VENDOR/lib"
-set-env GDAL_DATA "$APP_VENDOR/share/gdal"
+set_env GEOS_LIBRARY_PATH "$APP_VENDOR/lib"
+set_env GDAL_LIBRARY_PATH "$APP_VENDOR/lib"
+set_env PROJ4_LIBRARY_PATH "$APP_VENDOR/lib"
+set_env GDAL_DATA "$APP_VENDOR/share/gdal"
 
 # Bundle workaround
 mkdir -p $BUILD_DIR/.bundle
