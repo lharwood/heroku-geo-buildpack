@@ -2,24 +2,28 @@
 # bin/compile <build-dir> <cache-dir>
 
 # Fail fast
+#Exit immediately if a command exits with a non-zero status.
 set -e
 
 # Debug
+#Print a trace of simple commands
 # set -x
 
 # Clean up leaking environment
 unset GIT_DIR
 
-# Configuration
-S3_BUCKET=${HEROKU_GEO_BUILDBACK_S3_BUCKET:-"cyberdelia-geo-buildpack"}
-
 # Parameters
 BUILD_DIR=$1
 CACHE_DIR="${2}/${STACK}"
+TARGET_VENDOR_DIR=".heroku/vendor"
+PROFILE_PATH="$BUILD_DIR/.profile.d/geo.sh"
+APP_VENDOR="/app/$TARGET_VENDOR_DIR"
+S3_BUCKET=${HEROKU_GEO_BUILDBACK_S3_BUCKET:-"cyberdelia-geo-buildpack"}
 
 # Setup profile file
-PROFILE_PATH="$BUILD_DIR/.profile.d/geo.sh"
 mkdir -p $(dirname $PROFILE_PATH)
+mkdir -p "$CACHE_DIR"
+mkdir -p $BUILD_DIR/$TARGET_VENDOR_DIR
 
 # Functions
 function indent() {
@@ -44,59 +48,42 @@ function download_package() {
   curl $package -s -o - | tar xzf - -C $location
 }
 
-function set-env (){
+function set_env (){
   echo "export $1=$2" >> $PROFILE_PATH
 }
 
-function set-default-env (){
+function set_default_env (){
   echo "export $1=\${$1:-$2}" >> $PROFILE_PATH
 }
 
-# Retrieve versions
-GEOS_VERSION=$(manifest_version "geos")
-GDAL_VERSION=$(manifest_version "gdal")
-PROJ_VERSION=$(manifest_version "proj")
+#Display information for each package
+function display_info_for_package (){
+  version=$(manifest_version "${1}")
+  echo "Using ${1} version: $version" | indent
+}
 
-# Display some information
-echo "Using geos version: ${GEOS_VERSION}" | indent
-echo "Using gdal version: ${GDAL_VERSION}" | indent
-echo "Using proj version: ${PROJ_VERSION}" | indent
+#Moved old fetch and vendor code into function, to be called for each library
+function fetch_and_vendor (){
+  VENDORED="vendor/${1}/$VERSION"
+  #If the file doesn't exist
+  if [ ! -d $CACHE_DIR/$VENDORED ]; then
+    VERSION=$(manifest_version "${1}")
+    echo "-----> Fetching and vendoring ${1}"
+    rm -rf "$CACHE_DIR/vendor/${1}"
+    download_package "${1}" "${VERSION}" "${CACHE_DIR}/${VENDORED}"
+  fi
+ 
+  # Copy artifacts out of cache if exists.
+  cp -r $CACHE_DIR/$VENDORED/* $BUILD_DIR/$TARGET_VENDOR_DIR &> /dev/null || true
+}
 
-# Vendor directories
-VENDORED_GEOS="vendor/geos/$GEOS_VERSION"
-VENDORED_GDAL="vendor/gdal/$GDAL_VERSION"
-VENDORED_PROJ="vendor/proj/$PROJ_VERSION"
+display_info_for_package "geos"
+display_info_for_package "gdal"
+display_info_for_package "proj"
 
-# Make sure cache dir exists
-mkdir -p $CACHE_DIR
-
-if [ ! -d $CACHE_DIR/$VENDORED_GEOS ]; then
-  echo "-----> Fetching and vendoring geos"
-  rm -rf "$CACHE_DIR/vendor/geos"
-  download_package "geos" "${GEOS_VERSION}" "${CACHE_DIR}/${VENDORED_GEOS}"
-fi
-
-if [ ! -d $CACHE_DIR/$VENDORED_GDAL ]; then
-  echo "-----> Fetching and vendoring gdal"
-  rm -rf "$CACHE_DIR/vendor/gdal"
-  download_package "gdal" "${GDAL_VERSION}" "${CACHE_DIR}/${VENDORED_GDAL}"
-fi
-
-if [ ! -d $CACHE_DIR/$VENDORED_PROJ ]; then
-  echo "-----> Fetching and vendoring proj"
-  rm -rf "$CACHE_DIR/vendor/proj"
-  download_package "proj" "${PROJ_VERSION}" "${CACHE_DIR}/${VENDORED_PROJ}"
-fi
-
-TARGET_VENDOR_DIR=".heroku/vendor"
-# Copy artifacts out of cache if exists.
-for dir in $VENDORED_GEOS $VENDORED_GDAL $VENDORED_PROJ; do
-  mkdir -p $BUILD_DIR/$TARGET_VENDOR_DIR
-  cp -r $CACHE_DIR/$dir/* $BUILD_DIR/$TARGET_VENDOR_DIR &> /dev/null || true
-done
-
-# App directories
-APP_VENDOR="/app/$TARGET_VENDOR_DIR"
+fetch_and_vendor "geos"
+fetch_and_vendor "gdal"
+fetch_and_vendor "proj"
 
 # Setup environment variables
 set-env GEOS_LIBRARY_PATH "$APP_VENDOR/lib"
@@ -118,8 +105,8 @@ BUNDLE_WITHOUT: development:test
 BUNDLE_DISABLE_SHARED_GEMS: '1'
 " > $BUILD_DIR/.bundle/config
 
-set-default-env LIBRARY_PATH "$APP_VENDOR/lib"
-set-default-env LD_LIBRARY_PATH "$APP_VENDOR/lib"
-set-default-env CPATH "$APP_VENDOR/include"
+set_default_env LIBRARY_PATH "$APP_VENDOR/lib"
+set_default_env LD_LIBRARY_PATH "$APP_VENDOR/lib"
+set_default_env CPATH "$APP_VENDOR/include"
 
 echo "-----> Vendoring geo libraries done"
